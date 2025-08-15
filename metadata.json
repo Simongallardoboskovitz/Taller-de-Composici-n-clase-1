@@ -1,0 +1,7 @@
+{
+  "name": "Pose Composition Workshop",
+  "description": "An interactive web application that uses your camera to capture body poses. It leverages AI to analyze, name, and describe your poses, culminating in a personalized PDF report.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
