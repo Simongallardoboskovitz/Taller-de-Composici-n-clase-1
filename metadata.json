@@ -1,5 +1,5 @@
 {
-  "name": "Pose Composition Workshop",
+  "name": "TCCE-Clase 01_V1",
   "description": "An interactive web application that uses your camera to capture body poses. It leverages AI to analyze, name, and describe your poses, culminating in a personalized PDF report.",
   "requestFramePermissions": [
     "camera"

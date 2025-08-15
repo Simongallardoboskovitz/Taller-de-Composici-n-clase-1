@@ -1,5 +1,5 @@
 {
-  "name": "pose-composition-workshop",
+  "name": "tcce-clase-01_v1",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -12,10 +12,7 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "@google/genai": "^1.14.0",
-    "jspdf": "^3.0.1",
-    "@mediapipe/drawing_utils": "^0.3.1675466124",
-    "@mediapipe/camera_utils": "^0.3.1675466862",
-    "@mediapipe/pose": "^0.5.1675469404"
+    "jspdf": "^3.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

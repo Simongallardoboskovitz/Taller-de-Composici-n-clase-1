@@ -1,13 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Type } from "@google/genai";
-import * as PoseLib from '@mediapipe/pose';
-import * as CameraUtils from '@mediapipe/camera_utils';
-import * as DrawingUtils from '@mediapipe/drawing_utils';
 import { jsPDF } from 'jspdf';
 import type { UserData, PoseAngle, SavedPoseData, ZodiacSign } from './types';
 import { ZODIAC_SIGNS } from './constants';
 import UserSetupModal from './components/UserSetupModal';
 import CountdownModal from './components/CountdownModal';
+
+// Declare MediaPipe globals provided by script tags in index.html
+declare const Camera: any;
+declare const Pose: any;
+declare const POSE_CONNECTIONS: any;
+declare const drawConnectors: any;
+declare const drawLandmarks: any;
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
@@ -70,8 +74,8 @@ export default function App() {
     }
     
     if (results.poseLandmarks) {
-      DrawingUtils.drawConnectors(canvasCtx, results.poseLandmarks, PoseLib.POSE_CONNECTIONS, { color: '#FFFFFF', lineWidth: 2 });
-      DrawingUtils.drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#FFFFFF', radius: 3 });
+      drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, { color: '#FFFFFF', lineWidth: 2 });
+      drawLandmarks(canvasCtx, results.poseLandmarks, { color: '#FFFFFF', radius: 3 });
       
       const landmarks = results.poseLandmarks;
       const p = (i: number) => ({ x: landmarks[i].x * canvasRef.current!.width, y: landmarks[i].y * canvasRef.current!.height });
@@ -108,7 +112,7 @@ export default function App() {
         if(videoRef.current) videoRef.current.onloadedmetadata = resolve;
       });
 
-      const pose = new PoseLib.Pose({ locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
+      const pose = new Pose({ locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}` });
       pose.setOptions({
           modelComplexity: 1,
           smoothLandmarks: true,
@@ -119,7 +123,7 @@ export default function App() {
       });
       pose.onResults(onResults);
 
-      cameraRef.current = new CameraUtils.Camera(videoRef.current, {
+      cameraRef.current = new Camera(videoRef.current, {
           onFrame: async () => {
             if (videoRef.current) await pose.send({ image: videoRef.current });
           },
