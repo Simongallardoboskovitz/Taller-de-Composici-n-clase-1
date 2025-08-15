@@ -39,6 +39,28 @@ const mockDb = {
 const STABILITY_THRESHOLD = 50; // Total degrees of change allowed to be "stable"
 const STABILITY_DURATION_FRAMES = 45; // Approx 1.5 seconds of stability needed
 
+const angleLandmarkMap: { [key: string]: number } = {
+    'Codo Izquierdo': 13,
+    'Codo Derecho': 14,
+    'Hombro Izquierdo': 11,
+    'Hombro Derecho': 12,
+    'Cadera Izquierda': 23,
+    'Cadera Derecha': 24,
+    'Rodilla Izquierda': 25,
+    'Rodilla Derecha': 26,
+};
+
+const segmentsToMeasure: { name: string, landmarks: [number, number] }[] = [
+    { name: 'Brazo Izquierdo', landmarks: [11, 13] },
+    { name: 'Antebrazo Izquierdo', landmarks: [13, 15] },
+    { name: 'Brazo Derecho', landmarks: [12, 14] },
+    { name: 'Antebrazo Derecho', landmarks: [14, 16] },
+    { name: 'Muslo Izquierdo', landmarks: [23, 25] },
+    { name: 'Espinilla Izquierda', landmarks: [25, 27] },
+    { name: 'Muslo Derecho', landmarks: [24, 26] },
+    { name: 'Espinilla Derecha', landmarks: [26, 28] },
+];
+
 export default function App() {
   const [userData, setUserData] = useState<UserData | null>(null);
   const [isCameraReady, setCameraReady] = useState(false);
@@ -97,11 +119,63 @@ export default function App() {
           { name: 'Rodilla Izquierda', angle: calculateAngle(p(23), p(25), p(27)) }, { name: 'Rodilla Derecha', angle: calculateAngle(p(24), p(26), p(28)) },
       ];
       setCurrentAngles(newAngles);
+
+      if (userData) {
+        const shoulder_y_px = ((landmarks[11].y + landmarks[12].y) / 2) * canvasRef.current.height;
+        const hip_y_px = ((landmarks[23].y + landmarks[24].y) / 2) * canvasRef.current.height;
+        const torso_height_px = Math.abs(hip_y_px - shoulder_y_px);
+        let cm_per_pixel = 0;
+        if (torso_height_px > 1) { // Avoid division by zero
+            const torso_height_cm = userData.height * 0.30; // Anthropometric approximation: torso is ~30% of total height
+            cm_per_pixel = torso_height_cm / torso_height_px;
+        }
+
+        const drawTextWithBackground = (text: string, x: number, y: number) => {
+          canvasCtx.font = "bold 14px sans-serif";
+          const textMetrics = canvasCtx.measureText(text);
+          const padding = 5;
+          const rectX = x - (textMetrics.width / 2) - padding;
+          const rectY = y - 7 - padding; // 7 is half of font size
+          const rectW = textMetrics.width + (padding * 2);
+          const rectH = 14 + (padding * 2);
+
+          canvasCtx.fillStyle = "rgba(0, 0, 0, 0.7)";
+          canvasCtx.beginPath();
+          (canvasCtx as any).roundRect(rectX, rectY, rectW, rectH, 5);
+          canvasCtx.fill();
+          
+          canvasCtx.fillStyle = "white";
+          canvasCtx.textAlign = "center";
+          canvasCtx.textBaseline = "middle";
+          canvasCtx.fillText(text, x, y);
+        };
+        
+        if (cm_per_pixel > 0) {
+          segmentsToMeasure.forEach(segment => {
+            const p1 = p(segment.landmarks[0]);
+            const p2 = p(segment.landmarks[1]);
+            const dist_px = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+            const dist_cm = dist_px * cm_per_pixel;
+            const mid_x = (p1.x + p2.x) / 2;
+            const mid_y = (p1.y + p2.y) / 2;
+            drawTextWithBackground(`${dist_cm.toFixed(1)} cm`, mid_x, mid_y);
+          });
+
+          newAngles.forEach(angle => {
+            const landmarkIndex = angleLandmarkMap[angle.name];
+            if (landmarkIndex !== undefined) {
+              const vertex = p(landmarkIndex);
+              drawTextWithBackground(`${angle.angle}°`, vertex.x + 20, vertex.y - 20);
+            }
+          });
+        }
+      }
+
     } else {
       setCurrentAngles([]);
     }
     canvasCtx.restore();
-  }, []);
+  }, [userData]);
 
   const startCamera = useCallback(async () => {
     if (cameraRef.current) {
