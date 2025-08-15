@@ -36,13 +36,16 @@ const mockDb = {
 };
 // --- END MOCK ---
 
+const STABILITY_THRESHOLD = 50; // Total degrees of change allowed to be "stable"
+const STABILITY_DURATION_FRAMES = 45; // Approx 1.5 seconds of stability needed
 
 export default function App() {
   const [userData, setUserData] = useState<UserData | null>(null);
   const [isCameraReady, setCameraReady] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isCapturing, setIsCapturing] = useState(false);
-  const [countdown, setCountdown] = useState(10);
+  const [isPhraseRecording, setIsPhraseRecording] = useState(false);
+  const [countdown, setCountdown] = useState(8);
   const [useFrontCamera, setUseFrontCamera] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -54,6 +57,9 @@ export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cameraRef = useRef<any>(null);
+  const poseStabilityCounter = useRef(0);
+  const lastStableAngles = useRef<PoseAngle[] | null>(null);
+
 
   useEffect(() => {
     setIsMobile(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
@@ -144,9 +150,11 @@ export default function App() {
     if (userData) {
       startCamera();
       
-      // Setup Firebase listener
       const unsubscribe = mockDb.onSnapshot((data: SavedPoseData[]) => {
           setSavedPoses(data);
+          if (data.length >= 4) {
+            setIsPhraseRecording(false);
+          }
       });
       
       return () => {
@@ -156,6 +164,39 @@ export default function App() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userData, startCamera]);
+
+  // Effect for detecting pose stability
+  useEffect(() => {
+    if (!isPhraseRecording || isCapturing || savedPoses.length >= 4 || currentAngles.length === 0) {
+      poseStabilityCounter.current = 0;
+      return;
+    }
+
+    if (!lastStableAngles.current) {
+      lastStableAngles.current = currentAngles;
+      return;
+    }
+
+    const totalDiff = currentAngles.reduce((sum, angle, i) => {
+      // Ensure lastStableAngles.current[i] exists to prevent errors
+      const lastAngle = lastStableAngles.current?.[i]?.angle ?? angle.angle;
+      return sum + Math.abs(angle.angle - lastAngle);
+    }, 0);
+
+    if (totalDiff < STABILITY_THRESHOLD) {
+      poseStabilityCounter.current++;
+    } else {
+      poseStabilityCounter.current = 0;
+    }
+    
+    lastStableAngles.current = currentAngles;
+
+    if (poseStabilityCounter.current > STABILITY_DURATION_FRAMES) {
+      triggerPoseCapture();
+      poseStabilityCounter.current = 0; // Reset for the next pose
+    }
+
+  }, [currentAngles, isPhraseRecording, isCapturing, savedPoses.length]);
 
 
   const handleUserSetup = (data: UserData) => {
@@ -206,11 +247,18 @@ export default function App() {
       return result?.haiku || "Silencio del cuerpo,\nviento que no dice nada,\nsombra en la pared.";
   }
 
-  const handleSavePose = async () => {
-    if (savedPoses.length >= 4 || currentAngles.length === 0) return;
+  const handleStartPhraseRecording = () => {
+    if (savedPoses.length < 4) {
+      setIsPhraseRecording(true);
+    }
+  };
+  
+  const triggerPoseCapture = async () => {
+    if (isCapturing || savedPoses.length >= 4 || currentAngles.length === 0) return;
 
     setIsCapturing(true);
-    let currentCountdown = 10;
+    let currentCountdown = 8;
+    setCountdown(currentCountdown);
     const capturedPoses: PoseAngle[][] = [];
     let imageSnapshot: string | null = null;
     
@@ -226,6 +274,7 @@ export default function App() {
         setCountdown(currentCountdown);
         if (currentAngles.length > 0) capturedPoses.push([...currentAngles]);
 
+        // Take snapshot early in the countdown
         if (currentCountdown === 5 && canvasRef.current && tempCtx) {
             tempCtx.save();
             tempCtx.translate(tempCanvas.width, 0);
@@ -238,7 +287,7 @@ export default function App() {
         if (currentCountdown <= 0) {
             clearInterval(intervalId);
             setIsCapturing(false);
-            setCountdown(10);
+            setCountdown(8);
 
             if (capturedPoses.length < 5 || !imageSnapshot) {
                 alert("No se pudo capturar la pose de forma estable.");
@@ -293,6 +342,19 @@ export default function App() {
     doc.text(`${userData.name}'s Pose Analysis`, 105, 15, { align: 'center' });
     let y = 30;
 
+    // Generate and add the Socratic introduction
+    const poseConcepts = savedPoses.map(p => p.concept);
+    const introPrompt = `Eres un filósofo al estilo socrático. Escribe una breve introducción narrativa (menos de 1000 caracteres) para un análisis de lenguaje corporal. El análisis explora las siguientes cuatro posturas: ${poseConcepts.join(', ')}. Utiliza preguntas para guiar al lector a reflexionar sobre cómo el cuerpo narra un viaje a través de estos diferentes estados. ¿Cómo un gesto puede transformarse de ${poseConcepts[0]} a ${poseConcepts[3]}? ¿Qué nos dice esta secuencia sobre nosotros mismos?`;
+    const introSchema = { type: Type.OBJECT, properties: { introduction: { type: Type.STRING } } };
+    const introResult = await callGeminiAPI<{ introduction: string }>(introPrompt, introSchema);
+    const introduction = introResult?.introduction || "Observa tu cuerpo, el lienzo silencioso de tu alma. ¿Qué historias cuenta sin palabras?";
+    
+    doc.setFontSize(12);
+    doc.setFont('Helvetica', 'italic');
+    const introLines = doc.splitTextToSize(introduction, 180);
+    doc.text(introLines, 105, y, { align: 'center' });
+    y += (introLines.length * 5) + 15; // Add space after intro
+
     for (const pose of savedPoses) {
         const prompt = `Eres un astrólogo y experto en lenguaje corporal. Describe la siguiente postura en menos de 200 caracteres, interpretando su significado para una persona del signo ${userData.zodiac}. Postura: ${pose.angles.map(a => `${a.name}: ${a.angle}°`).join(', ')}. Sé poético y perspicaz.`;
         const schema = { type: Type.OBJECT, properties: { description: { type: Type.STRING } } };
@@ -328,6 +390,13 @@ export default function App() {
     return <UserSetupModal onSubmit={handleUserSetup} zodiacSigns={ZODIAC_SIGNS} />;
   }
 
+  const getButtonText = () => {
+    if (isPhraseRecording) {
+      return 'Grabando Frase (buscando pose estable...)';
+    }
+    return 'Comenzar a grabar una Frase';
+  }
+
   return (
     <div className="bg-black text-white flex flex-col items-center min-h-screen p-4">
       {isCapturing && <CountdownModal countdown={countdown} />}
@@ -356,11 +425,11 @@ export default function App() {
 
       <footer className="w-full max-w-5xl mx-auto mt-4">
         <button 
-          onClick={handleSavePose} 
-          disabled={savedPoses.length >= 4 || isCapturing}
+          onClick={handleStartPhraseRecording} 
+          disabled={savedPoses.length >= 4 || isCapturing || isPhraseRecording}
           className="w-full bg-gray-800 hover:bg-gray-700 border border-white text-white font-bold py-3 px-4 shadow-md footer-button mb-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          💾 Guardar Nueva Pose
+          {getButtonText()}
         </button>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
           {Array.from({ length: 4 }).map((_, i) => {
