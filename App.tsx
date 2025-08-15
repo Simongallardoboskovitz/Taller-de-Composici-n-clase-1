@@ -39,17 +39,6 @@ const mockDb = {
 const STABILITY_THRESHOLD = 50; // Total degrees of change allowed to be "stable"
 const STABILITY_DURATION_FRAMES = 45; // Approx 1.5 seconds of stability needed
 
-const angleLandmarkMap: { [key: string]: number } = {
-    'Codo Izquierdo': 13,
-    'Codo Derecho': 14,
-    'Hombro Izquierdo': 11,
-    'Hombro Derecho': 12,
-    'Cadera Izquierda': 23,
-    'Cadera Derecha': 24,
-    'Rodilla Izquierda': 25,
-    'Rodilla Derecha': 26,
-};
-
 const segmentsToMeasure: { name: string, landmarks: [number, number] }[] = [
     { name: 'Brazo Izquierdo', landmarks: [11, 13] },
     { name: 'Antebrazo Izquierdo', landmarks: [13, 15] },
@@ -107,17 +96,27 @@ export default function App() {
       
       const landmarks = results.poseLandmarks;
       const p = (i: number) => ({ x: landmarks[i].x * canvasRef.current!.width, y: landmarks[i].y * canvasRef.current!.height });
+      
+      const angleDefinitions = [
+        { name: 'Codo Izquierdo', points: [p(11), p(13), p(15)] as const },
+        { name: 'Codo Derecho', points: [p(12), p(14), p(16)] as const },
+        { name: 'Hombro Izquierdo', points: [p(23), p(11), p(13)] as const },
+        { name: 'Hombro Derecho', points: [p(24), p(12), p(14)] as const },
+        { name: 'Cadera Izquierda', points: [p(11), p(23), p(25)] as const },
+        { name: 'Cadera Derecha', points: [p(12), p(24), p(26)] as const },
+        { name: 'Rodilla Izquierda', points: [p(23), p(25), p(27)] as const },
+        { name: 'Rodilla Derecha', points: [p(24), p(26), p(28)] as const },
+      ];
+
       const calculateAngle = (a: {x:number, y:number}, b: {x:number, y:number}, c: {x:number, y:number}) => {
         let angle = Math.abs(Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x)) * 180 / Math.PI;
         return Math.round(angle > 180 ? 360 - angle : angle);
       }
-      
-      const newAngles: PoseAngle[] = [
-          { name: 'Codo Izquierdo', angle: calculateAngle(p(11), p(13), p(15)) }, { name: 'Codo Derecho', angle: calculateAngle(p(12), p(14), p(16)) },
-          { name: 'Hombro Izquierdo', angle: calculateAngle(p(23), p(11), p(13)) }, { name: 'Hombro Derecho', angle: calculateAngle(p(24), p(12), p(14)) },
-          { name: 'Cadera Izquierda', angle: calculateAngle(p(11), p(23), p(25)) }, { name: 'Cadera Derecha', angle: calculateAngle(p(12), p(24), p(26)) },
-          { name: 'Rodilla Izquierda', angle: calculateAngle(p(23), p(25), p(27)) }, { name: 'Rodilla Derecha', angle: calculateAngle(p(24), p(26), p(28)) },
-      ];
+
+      const newAngles: PoseAngle[] = angleDefinitions.map(def => ({
+          name: def.name,
+          angle: calculateAngle(...def.points)
+      }));
       setCurrentAngles(newAngles);
 
       if (userData) {
@@ -149,6 +148,21 @@ export default function App() {
           canvasCtx.textBaseline = "middle";
           canvasCtx.fillText(text, x, y);
         };
+
+        const drawAngleArc = (p1: {x:number, y:number}, p2: {x:number, y:number}, p3: {x:number, y:number}) => {
+            const rad1 = Math.atan2(p1.y - p2.y, p1.x - p2.x);
+            const rad2 = Math.atan2(p3.y - p2.y, p3.x - p2.x);
+
+            let diff = rad2 - rad1;
+            while (diff <= -Math.PI) diff += 2 * Math.PI;
+            while (diff > Math.PI) diff -= 2 * Math.PI;
+            
+            canvasCtx.beginPath();
+            canvasCtx.strokeStyle = 'rgba(255, 255, 0, 0.7)';
+            canvasCtx.lineWidth = 5;
+            canvasCtx.arc(p2.x, p2.y, 20, rad1, rad1 + diff);
+            canvasCtx.stroke();
+        };
         
         if (cm_per_pixel > 0) {
           segmentsToMeasure.forEach(segment => {
@@ -161,11 +175,12 @@ export default function App() {
             drawTextWithBackground(`${dist_cm.toFixed(1)} cm`, mid_x, mid_y);
           });
 
-          newAngles.forEach(angle => {
-            const landmarkIndex = angleLandmarkMap[angle.name];
-            if (landmarkIndex !== undefined) {
-              const vertex = p(landmarkIndex);
-              drawTextWithBackground(`${angle.angle}°`, vertex.x + 20, vertex.y - 20);
+          angleDefinitions.forEach(def => {
+            const angleValue = newAngles.find(a => a.name === def.name)?.angle;
+            if (angleValue !== undefined) {
+                drawAngleArc(...def.points);
+                const vertex = def.points[1];
+                drawTextWithBackground(`${angleValue}°`, vertex.x + 20, vertex.y - 20);
             }
           });
         }
@@ -411,12 +426,15 @@ export default function App() {
     setIsGeneratingPdf(true);
 
     const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 10;
+    const contentWidth = pageWidth - (margin * 2);
+
+    // Page 1: Title and Introduction
     doc.setFont('Helvetica', 'normal');
     doc.setFontSize(22);
-    doc.text(`${userData.name}'s Pose Analysis`, 105, 15, { align: 'center' });
-    let y = 30;
+    doc.text(`${userData.name}_Poses_UNIACC`, pageWidth / 2, 20, { align: 'center' });
 
-    // Generate and add the Socratic introduction
     const poseConcepts = savedPoses.map(p => p.concept);
     const introPrompt = `Eres un filósofo al estilo socrático. Escribe una breve introducción narrativa (menos de 1000 caracteres) para un análisis de lenguaje corporal. El análisis explora las siguientes cuatro posturas: ${poseConcepts.join(', ')}. Utiliza preguntas para guiar al lector a reflexionar sobre cómo el cuerpo narra un viaje a través de estos diferentes estados. ¿Cómo un gesto puede transformarse de ${poseConcepts[0]} a ${poseConcepts[3]}? ¿Qué nos dice esta secuencia sobre nosotros mismos?`;
     const introSchema = { type: Type.OBJECT, properties: { introduction: { type: Type.STRING } } };
@@ -425,38 +443,40 @@ export default function App() {
     
     doc.setFontSize(12);
     doc.setFont('Helvetica', 'italic');
-    const introLines = doc.splitTextToSize(introduction, 180);
-    doc.text(introLines, 105, y, { align: 'center' });
-    y += (introLines.length * 5) + 15; // Add space after intro
+    const introLines = doc.splitTextToSize(introduction, contentWidth);
+    doc.text(introLines, pageWidth / 2, 40, { align: 'center' });
 
+    // Subsequent pages: One for each pose
     for (const pose of savedPoses) {
+        doc.addPage();
+        let y = 30;
+
         const prompt = `Eres un astrólogo y experto en lenguaje corporal. Describe la siguiente postura en menos de 200 caracteres, interpretando su significado para una persona del signo ${userData.zodiac}. Postura: ${pose.angles.map(a => `${a.name}: ${a.angle}°`).join(', ')}. Sé poético y perspicaz.`;
         const schema = { type: Type.OBJECT, properties: { description: { type: Type.STRING } } };
         const result = await callGeminiAPI<{ description: string }>(prompt, schema);
         const description = result?.description || "No se pudo generar una descripción.";
 
-        if (y > 220) { doc.addPage(); y = 20; }
-        doc.setFontSize(16);
+        doc.setFontSize(18);
         doc.setFont('Helvetica', 'bold');
-        doc.text(pose.concept, 10, y);
-        y += 10;
+        doc.text(pose.concept, margin, y);
+        y += 15;
         
-        doc.addImage(pose.image, 'JPEG', 10, y, 80, 45);
-        y += 55;
+        const imageHeight = contentWidth * (9 / 16); // Maintain 16:9 aspect ratio
+        doc.addImage(pose.image, 'JPEG', margin, y, contentWidth, imageHeight);
+        y += imageHeight + 15;
 
-        doc.setFontSize(11);
+        doc.setFontSize(12);
         doc.setFont('Helvetica', 'italic');
-        const haikuLines = doc.splitTextToSize(pose.haiku, 180);
-        doc.text(haikuLines, 10, y);
-        y += (haikuLines.length * 5) + 5;
+        const haikuLines = doc.splitTextToSize(pose.haiku, contentWidth);
+        doc.text(haikuLines, margin, y);
+        y += (haikuLines.length * 6) + 10;
 
         doc.setFont('Helvetica', 'normal');
-        const splitDesc = doc.splitTextToSize(description, 180);
-        doc.text(splitDesc, 10, y);
-        y += (splitDesc.length * 5) + 15;
+        const splitDesc = doc.splitTextToSize(description, contentWidth);
+        doc.text(splitDesc, margin, y);
     }
 
-    doc.save(`${userData.name}_poses.pdf`);
+    doc.save(`${userData.name}_Poses_UNIACC.pdf`);
     setIsGeneratingPdf(false);
   };
 
